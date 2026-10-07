@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>カタン ランダム盤面</title>
+<meta name="theme-color" content="#4F8FBF">
 <meta name="description" content="カタン（3〜4人用）の地形・数字・港をランダムに並べた盤面を、画面いっぱいに表示します。">
 <style>
   :root {
@@ -32,7 +33,7 @@
   main {
     flex: 1;
     min-height: 0;
-    padding: 8px;
+    padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) 8px max(8px, env(safe-area-inset-left));
     background: #4F8FBF; /* 海 */
   }
   #board { width: 100%; height: 100%; display: block; }
@@ -65,8 +66,22 @@
     font-weight: 700;
     box-shadow: var(--shadow-card);
     cursor: pointer;
+    touch-action: manipulation; /* 連打でダブルタップ拡大にならないように */
   }
   .bar button:active { transform: translateY(1px); }
+  /* スマホ横向き: 高さが足りないのでボタンを右側の縦帯に移す */
+  @media (orientation: landscape) and (max-height: 500px) {
+    body { flex-direction: row; }
+    main { padding-bottom: max(8px, env(safe-area-inset-bottom)); padding-right: 8px; }
+    .bar {
+      flex-direction: column;
+      justify-content: flex-end;
+      border-top: 0;
+      border-left: 1px solid var(--border);
+      padding: 12px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) 12px;
+    }
+    .bar h1 { display: none; }
+  }
 </style>
 </head>
 <body>
@@ -189,6 +204,22 @@ function text(parent, x, y, str, attrs) {
 const pts = (list) => list.map((p) => p.join(',')).join(' ');
 const pips = (n) => 6 - Math.abs(7 - n);
 
+// 文字・チップの大きさ（S 倍）。スマホ表示は盤面が小さく映るぶん文字とチップを大きくする
+const SIZES = {
+  normal: {
+    label: 0.19, labelY: -0.6,
+    chipR: 0.38, chipY: 0.05, num: 0.34, numY: -0.02, pipY: 0.24, pipR: 0.035, pipGap: 0.1,
+    robber: 1,
+    portR: 0.36, portDist: 0.62, ratio: 0.2, ratioY: -0.09, portName: 0.15, portNameY: 0.14, any: 0.22,
+  },
+  compact: {
+    label: 0.3, labelY: -0.6,
+    chipR: 0.44, chipY: 0.14, num: 0.44, numY: 0.07, pipY: 0.4, pipR: 0.05, pipGap: 0.12,
+    robber: 1.25,
+    portR: 0.48, portDist: 0.68, ratio: 0.2, ratioY: 0.21, portName: 0.25, portNameY: -0.06, any: 0.3,
+  },
+};
+
 const svg = document.getElementById('board');
 let state = generate();
 
@@ -196,6 +227,9 @@ function render() {
   // 縦長の画面では盤面を90度回して大きく見せる（文字は回さない）
   const rotate = svg.clientHeight > svg.clientWidth;
   const P = ([x, y]) => (rotate ? [-y, x] : [x, y]);
+  const compact = Math.min(svg.clientWidth, svg.clientHeight) < 600;
+  const Z = compact ? SIZES.compact : SIZES.normal;
+  svg.dataset.compact = compact ? '1' : '0';
 
   svg.replaceChildren();
   svg.setAttribute('font-family', 'system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif');
@@ -216,20 +250,20 @@ function render() {
     const nx = e.mid[0] - e.c[0];
     const ny = e.mid[1] - e.c[1];
     const len = Math.hypot(nx, ny);
-    const pos = P([e.mid[0] + nx / len * 0.62 * S, e.mid[1] + ny / len * 0.62 * S]);
+    const pos = P([e.mid[0] + nx / len * Z.portDist * S, e.mid[1] + ny / len * Z.portDist * S]);
     const g = el('g', { class: 'port', 'data-port': type, 'data-slot': slot, 'data-edge': edge }, svg);
     [e.a, e.b].forEach((v) => {
       const [x, y] = P(v);
       el('line', { x1: pos[0], y1: pos[1], x2: x, y2: y, stroke: '#7A5C3A', 'stroke-width': 0.07 * S, 'stroke-linecap': 'round' }, g);
     });
     const t = TERRAIN[type];
-    el('circle', { cx: pos[0], cy: pos[1], r: 0.36 * S, fill: t ? t.fill : '#F5EDD6', stroke: '#FAFAF8', 'stroke-width': 0.05 * S }, g);
+    el('circle', { cx: pos[0], cy: pos[1], r: Z.portR * S, fill: t ? t.fill : '#F5EDD6', stroke: '#FAFAF8', 'stroke-width': 0.05 * S }, g);
     const ink = t ? t.ink : '#1A1A1A';
     if (t) {
-      text(g, pos[0], pos[1] - 0.09 * S, '2:1', { 'font-size': 0.2 * S, 'font-weight': 700, fill: ink });
-      text(g, pos[0], pos[1] + 0.14 * S, t.name, { 'font-size': 0.15 * S, 'font-weight': 700, fill: ink });
+      text(g, pos[0], pos[1] + Z.ratioY * S, '2:1', { 'font-size': Z.ratio * S, 'font-weight': 700, fill: ink });
+      text(g, pos[0], pos[1] + Z.portNameY * S, t.name, { 'font-size': Z.portName * S, 'font-weight': 700, fill: ink, class: 'port-name' });
     } else {
-      text(g, pos[0], pos[1], '3:1', { 'font-size': 0.22 * S, 'font-weight': 700, fill: ink });
+      text(g, pos[0], pos[1], '3:1', { 'font-size': Z.any * S, 'font-weight': 700, fill: ink });
     }
   });
 
@@ -242,24 +276,25 @@ function render() {
     const hex = [];
     for (let i = 0; i < 6; i++) hex.push(P(corner(c, i)));
     el('polygon', { points: pts(hex), fill: t.fill, stroke: '#F3E6C4', 'stroke-width': 0.07 * S, 'stroke-linejoin': 'round' }, g);
-    text(g, x, y - 0.6 * S, t.name, { 'font-size': 0.19 * S, 'font-weight': 700, fill: t.ink });
+    text(g, x, y + Z.labelY * S, t.name, { 'font-size': Z.label * S, 'font-weight': 700, fill: t.ink, class: 'label' });
 
     if (tile.number == null) {
       // 盗賊
-      el('circle', { cx: x, cy: y - 0.2 * S, r: 0.13 * S, fill: '#3A3A3A' }, g);
+      const k = Z.robber * S;
+      el('circle', { cx: x, cy: y - 0.2 * k, r: 0.13 * k, fill: '#3A3A3A' }, g);
       el('path', {
-        d: `M ${x - 0.2 * S} ${y + 0.32 * S} Q ${x - 0.2 * S} ${y - 0.1 * S} ${x} ${y - 0.1 * S} Q ${x + 0.2 * S} ${y - 0.1 * S} ${x + 0.2 * S} ${y + 0.32 * S} Z`,
+        d: `M ${x - 0.2 * k} ${y + 0.32 * k} Q ${x - 0.2 * k} ${y - 0.1 * k} ${x} ${y - 0.1 * k} Q ${x + 0.2 * k} ${y - 0.1 * k} ${x + 0.2 * k} ${y + 0.32 * k} Z`,
         fill: '#3A3A3A',
       }, g);
       return;
     }
     const hot = tile.number === 6 || tile.number === 8;
     const ink = hot ? '#B3261E' : '#1A1A1A';
-    el('circle', { cx: x, cy: y + 0.05 * S, r: 0.38 * S, fill: '#F5EDD6', stroke: 'rgba(0,0,0,0.15)', 'stroke-width': 0.03 * S }, g);
-    text(g, x, y - 0.02 * S, String(tile.number), { 'font-size': 0.34 * S, 'font-weight': 700, fill: ink, class: 'num' });
+    el('circle', { cx: x, cy: y + Z.chipY * S, r: Z.chipR * S, fill: '#F5EDD6', stroke: 'rgba(0,0,0,0.15)', 'stroke-width': 0.03 * S }, g);
+    text(g, x, y + Z.numY * S, String(tile.number), { 'font-size': Z.num * S, 'font-weight': 700, fill: ink, class: 'num' });
     const n = pips(tile.number);
     for (let i = 0; i < n; i++) {
-      el('circle', { cx: x + (i - (n - 1) / 2) * 0.1 * S, cy: y + 0.24 * S, r: 0.035 * S, fill: ink }, g);
+      el('circle', { cx: x + (i - (n - 1) / 2) * Z.pipGap * S, cy: y + Z.pipY * S, r: Z.pipR * S, fill: ink }, g);
     }
   });
 

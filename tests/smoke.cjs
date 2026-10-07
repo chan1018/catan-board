@@ -36,10 +36,26 @@ const readBoard = (page) => page.evaluate(() => {
     const b = e.getBBox();
     if (b.x < vb.x - 1 || b.y < vb.y - 1 || b.x + b.width > vb.x + vb.width + 1 || b.y + b.height > vb.y + vb.height + 1) inside = false;
   }
+  // 画面上の文字の大きさ(px) = font-size × 拡大率
+  const scale = svg.getScreenCTM().a;
+  const minPx = (sel) => Math.min(...[...svg.querySelectorAll(sel)].map((e) => Number(e.getAttribute('font-size')) * scale));
+  // 地形名と数字チップが重ならないか・港の札どうしが重ならないか
+  let overlap = false;
+  for (const g of svg.querySelectorAll('.tile')) {
+    const label = g.querySelector('.label').getBBox();
+    const chip = g.querySelector('circle');
+    if (g.dataset.number && label.y + label.height > Number(chip.getAttribute('cy')) - Number(chip.getAttribute('r'))) overlap = true;
+  }
+  const portCircles = [...svg.querySelectorAll('.port circle')].map((c) => ['cx', 'cy', 'r'].map((k) => Number(c.getAttribute(k))));
+  portCircles.forEach((a, i) => portCircles.slice(i + 1).forEach((b) => {
+    if (Math.hypot(a[0] - b[0], a[1] - b[1]) < a[2] + b[2]) overlap = true;
+  }));
+  const px = { num: minPx('.num'), label: minPx('.label'), port: minPx('.port-name') };
+  const compact = svg.dataset.compact;
   const r = svg.getBoundingClientRect();
   const btn = document.getElementById('regen').getBoundingClientRect();
   return {
-    tiles, ports, frames, seams, inside, vbW: vb.width, vbH: vb.height,
+    tiles, ports, frames, seams, inside, px, compact, overlap, vbW: vb.width, vbH: vb.height,
     svgW: r.width, svgH: r.height, btnH: btn.height,
     btnVisible: btn.bottom <= innerHeight && btn.top >= 0,
     scrollX: document.documentElement.scrollWidth > innerWidth,
@@ -95,6 +111,8 @@ const count = (arr) => arr.reduce((m, k) => ((m[k] = (m[k] || 0) + 1), m), {});
     ok('PC: はみ出しなし', b1.inside);
     ok('PC: 横長の向き', b1.vbW > b1.vbH, `${b1.vbW}x${b1.vbH}`);
     ok('PC: 盤面が画面の大半を使う', b1.svgH / 800 > 0.8, (b1.svgH / 800).toFixed(2));
+    ok('PC: 通常表示のまま（スマホ表示にならない）', b1.compact === '0', b1.compact);
+    ok('PC: 重なりなし', !b1.overlap);
     await page.screenshot({ path: path.join(SHOTS, 'pc.png') });
 
     // --- ボタンで作り直し（20回中、配置が前回と同じだった回数は 0 のはず）---
@@ -123,6 +141,10 @@ const count = (arr) => arr.reduce((m, k) => ((m[k] = (m[k] || 0) + 1), m), {});
     const b2 = await readBoard(page);
     ok('スマホ縦: 盤面を回して縦長に', b2.vbH > b2.vbW, `${b2.vbW}x${b2.vbH}`);
     ok('スマホ縦: はみ出しなし', b2.inside);
+    ok('スマホ縦: スマホ表示に切り替わる', b2.compact === '1', b2.compact);
+    ok('スマホ縦: 数字14px以上・地形名10px以上・港の資源名8px以上',
+      b2.px.num >= 14 && b2.px.label >= 10 && b2.px.port >= 8, JSON.stringify(Object.fromEntries(Object.entries(b2.px).map(([k, v]) => [k, v.toFixed(1)]))));
+    ok('スマホ縦: 重なりなし', !b2.overlap);
     ok('スマホ縦: 横スクロールなし', !b2.scrollX);
     ok('スマホ縦: ボタンが画面内・44px以上', b2.btnVisible && b2.btnH >= 44, b2.btnH);
     await page.screenshot({ path: path.join(SHOTS, 'phone-portrait.png') });
@@ -133,7 +155,18 @@ const count = (arr) => arr.reduce((m, k) => ((m[k] = (m[k] || 0) + 1), m), {});
     const b3 = await readBoard(page);
     ok('スマホ横: 回転を戻す', b3.vbW > b3.vbH, `${b3.vbW}x${b3.vbH}`);
     ok('スマホ横: はみ出しなし', b3.inside);
+    ok('スマホ横: スマホ表示・重なりなし', b3.compact === '1' && !b3.overlap, b3.compact);
+    ok('スマホ横: 盤面が高さのほぼ全部を使う', b3.svgH / 390 > 0.9, (b3.svgH / 390).toFixed(2));
+    ok('スマホ横: ボタンが画面内・44px以上', b3.btnVisible && b3.btnH >= 44, b3.btnH);
     await page.screenshot({ path: path.join(SHOTS, 'phone-landscape.png') });
+
+    // --- 小さいスマホ（iPhone SE 相当）---
+    await page.setViewport({ width: 375, height: 667, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    await page.goto(url, { waitUntil: 'load' });
+    const b4 = await readBoard(page);
+    ok('SE: はみ出しなし・重なりなし・横スクロールなし', b4.inside && !b4.overlap && !b4.scrollX);
+    ok('SE: 数字14px以上', b4.px.num >= 14, b4.px.num.toFixed(1));
+    await page.screenshot({ path: path.join(SHOTS, 'phone-se.png') });
 
     ok('コンソールエラーなし', errors.length === 0, errors.join(' / '));
   } finally {
