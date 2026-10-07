@@ -101,9 +101,15 @@ const TILES = [
   'desert',
 ];
 const NUMBERS = [2, 3, 3, 4, 4, 5, 5, 6, 6, 8, 8, 9, 9, 10, 10, 11, 11, 12];
-const PORTS = ['any', 'any', 'any', 'any', 'wood', 'brick', 'sheep', 'wheat', 'ore'];
-// 外周30辺のうち港を置く間隔（3,3,4 の繰り返しで9か所）
-const PORT_GAPS = [3, 3, 4, 3, 3, 4, 3, 3, 4];
+// 枠パーツ6枚。1枚が海岸線5辺ぶんで、[何番目の辺(0始まり・時計回り), 港の種類]
+const FRAMES = [
+  [[0, 'any'], [3, 'wheat']],
+  [[0, 'any'], [3, 'brick']],
+  [[0, 'any'], [3, 'sheep']],
+  [[2, 'ore']],
+  [[2, 'wood']],
+  [[2, 'any']],
+];
 
 // 尖頂（pointy-top）六角形。辺 i の向こう側の隣接マス（axial 座標の差分）
 const DIRS = [[1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]];
@@ -130,12 +136,16 @@ HEXES.forEach((h) => {
     const a = corner(c, i);
     const b = corner(c, (i + 1) % 6);
     const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-    COAST.push({ a, b, mid, c, angle: Math.atan2(mid[1], mid[0]) });
+    COAST.push({ a, b, mid, c, q: h.q, r: h.r, i, angle: Math.atan2(mid[1], mid[0]) });
   });
 });
-COAST.sort((x, y) => x.angle - y.angle);
-const PORT_EDGES = [];
-for (let i = 0, k = 0; k < PORT_GAPS.length; i += PORT_GAPS[k], k++) PORT_EDGES.push(COAST[i]);
+COAST.sort((x, y) => x.angle - y.angle); // 画面上で時計回り
+// 枠の6辺。上辺の枠は左上角のマスの左上の辺から始まり、そこから5辺ずつ時計回りに並ぶ
+const TOP = COAST.findIndex((e) => e.q === 0 && e.r === -2 && e.i === 4);
+const SLOTS = [];
+for (let k = 0; k < 6; k++) {
+  SLOTS.push([0, 1, 2, 3, 4].map((j) => COAST[(TOP + 5 * k + j) % COAST.length]));
+}
 
 function randomInt(n) {
   const buf = new Uint32Array(1);
@@ -161,7 +171,7 @@ function generate() {
       terrain: terrains[i],
       number: terrains[i] === 'desert' ? null : numbers[n++],
     })),
-    ports: shuffle(PORTS),
+    frames: shuffle(FRAMES),
   };
 }
 
@@ -190,14 +200,24 @@ function render() {
   svg.replaceChildren();
   svg.setAttribute('font-family', 'system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif');
 
+  // 枠パーツの継ぎ目（各パーツの左端の頂点から外へ）
+  SLOTS.forEach((slot) => {
+    const v = slot[0].a;
+    const len = Math.hypot(v[0], v[1]);
+    const [x1, y1] = P(v);
+    const [x2, y2] = P([v[0] / len * (len + 0.55 * S), v[1] / len * (len + 0.55 * S)]);
+    el('line', { class: 'seam', x1, y1, x2, y2, stroke: 'rgba(255,255,255,0.45)', 'stroke-width': 0.04 * S, 'stroke-dasharray': `${0.1 * S} ${0.08 * S}` }, svg);
+  });
+
   // 港（桟橋2本＋札）
-  state.ports.forEach((type, i) => {
-    const e = PORT_EDGES[i];
+  const ports = [];
+  state.frames.forEach((frame, k) => frame.forEach(([j, type]) => ports.push({ e: SLOTS[k][j], type, slot: k, edge: j })));
+  ports.forEach(({ e, type, slot, edge }) => {
     const nx = e.mid[0] - e.c[0];
     const ny = e.mid[1] - e.c[1];
     const len = Math.hypot(nx, ny);
     const pos = P([e.mid[0] + nx / len * 0.62 * S, e.mid[1] + ny / len * 0.62 * S]);
-    const g = el('g', { class: 'port', 'data-port': type }, svg);
+    const g = el('g', { class: 'port', 'data-port': type, 'data-slot': slot, 'data-edge': edge }, svg);
     [e.a, e.b].forEach((v) => {
       const [x, y] = P(v);
       el('line', { x1: pos[0], y1: pos[1], x2: x, y2: y, stroke: '#7A5C3A', 'stroke-width': 0.07 * S, 'stroke-linecap': 'round' }, g);

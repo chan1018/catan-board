@@ -24,6 +24,10 @@ const readBoard = (page) => page.evaluate(() => {
     numColor: g.querySelector('.num')?.getAttribute('fill') ?? null,
   }));
   const ports = [...document.querySelectorAll('.port')].map((g) => g.dataset.port);
+  // 枠パーツごとに「何番目の辺に何の港」かをまとめる（並びは slot 順）
+  const frames = [0, 1, 2, 3, 4, 5].map((k) => [...document.querySelectorAll(`.port[data-slot="${k}"]`)]
+    .map((g) => `${g.dataset.edge}:${g.dataset.port}`).sort().join(','));
+  const seams = document.querySelectorAll('.seam').length;
   const svg = document.getElementById('board');
   const vb = svg.viewBox.baseVal;
   // 盤面の全要素が viewBox の内側に収まっているか
@@ -35,7 +39,7 @@ const readBoard = (page) => page.evaluate(() => {
   const r = svg.getBoundingClientRect();
   const btn = document.getElementById('regen').getBoundingClientRect();
   return {
-    tiles, ports, inside, vbW: vb.width, vbH: vb.height,
+    tiles, ports, frames, seams, inside, vbW: vb.width, vbH: vb.height,
     svgW: r.width, svgH: r.height, btnH: btn.height,
     btnVisible: btn.bottom <= innerHeight && btn.top >= 0,
     scrollX: document.documentElement.scrollWidth > innerWidth,
@@ -70,6 +74,24 @@ const count = (arr) => arr.reduce((m, k) => ((m[k] = (m[k] || 0) + 1), m), {});
     ok('6と8だけ赤', b1.tiles.filter((x) => x.number).every((x) => (x.number === '6' || x.number === '8') === (x.numColor === '#B3261E')));
     const p = count(b1.ports);
     ok('港9か所 3:1×4 と 2:1各1', b1.ports.length === 9 && p.any === 4 && ['wood', 'brick', 'sheep', 'wheat', 'ore'].every((k) => p[k] === 1), JSON.stringify(p));
+    // 写真の枠パーツ6枚: 1番目の辺に3:1＋4番目に2:1（小麦・レンガ・羊）／3番目に1つ（石・木・3:1）
+    const PIECES = ['0:any,3:wheat', '0:any,3:brick', '0:any,3:sheep', '2:ore', '2:wood', '2:any'];
+    ok('港が枠パーツ6枚の組み合わせどおり', [...b1.frames].sort().join('|') === [...PIECES].sort().join('|'), b1.frames.join(' | '));
+    ok('継ぎ目が6本', b1.seams === 6, b1.seams);
+    // 6つの枠の位置が、上辺の枠を60度ずつ時計回りに回したものになっているか
+    const slotsOk = await page.evaluate(() => {
+      const key = (e) => `${e.q},${e.r},${e.i}`;
+      const rot = (e, k) => {
+        let { q, r, i } = e;
+        for (let n = 0; n < k; n++) { [q, r] = [-r, q + r]; i = (i + 1) % 6; }
+        return { q, r, i };
+      };
+      const top = SLOTS[0].map(key).join('|') === '0,-2,4|0,-2,5|1,-2,4|1,-2,5|2,-2,4';
+      const rotated = SLOTS.every((slot, k) => slot.map(key).join('|') === SLOTS[0].map((e) => key(rot(e, k))).join('|'));
+      const all = new Set(SLOTS.flat().map(key)).size === 30;
+      return top && rotated && all;
+    });
+    ok('枠6つが外周30辺を5辺ずつ・同じ形で覆う', slotsOk);
     ok('PC: はみ出しなし', b1.inside);
     ok('PC: 横長の向き', b1.vbW > b1.vbH, `${b1.vbW}x${b1.vbH}`);
     ok('PC: 盤面が画面の大半を使う', b1.svgH / 800 > 0.8, (b1.svgH / 800).toFixed(2));
@@ -80,16 +102,20 @@ const count = (arr) => arr.reduce((m, k) => ((m[k] = (m[k] || 0) + 1), m), {});
     let prev = sig(b1);
     let same = 0;
     let valid = true;
+    const frameOrders = new Set([b1.frames.join('|')]);
     for (let i = 0; i < 20; i++) {
       await page.click('#regen');
       const b = await readBoard(page);
       if (sig(b) === prev) same++;
       prev = sig(b);
+      frameOrders.add(b.frames.join('|'));
       const c = count(b.tiles.map((x) => x.terrain));
       if (b.tiles.length !== 19 || c.desert !== 1 || b.ports.length !== 9 || !b.inside) valid = false;
+      if ([...b.frames].sort().join('|') !== [...PIECES].sort().join('|')) valid = false;
     }
     ok('ボタンで盤面が変わる', same === 0, `同一 ${same}/20`);
     ok('作り直しても毎回正しい構成', valid);
+    ok('枠パーツの並び順も変わる', frameOrders.size >= 15, `${frameOrders.size}/21 通り`);
 
     // --- スマホ縦 ---
     await page.setViewport({ width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
