@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- 海の上に六角形7枚の小さな盤面。中央に赤い「8」のチップ。
+       外側の頂点は中心から約190px以内＝maskable の安全域（半径205px）に収まる -->
+  <rect width="512" height="512" fill="#4F8FBF"/>
+  <g stroke="#F3E6C4" stroke-width="9" stroke-linejoin="round">
+    <!-- 尖頂六角形 r=72。中心からの隣接方向 0°,60°,…,300°（距離 124.7） -->
+    <polygon fill="#B85C38" points="318.4,220 318.4,292 256,328 193.6,292 193.6,220 256,184"/>
+    <polygon fill="#3F7A3A" points="443.1,220 443.1,292 380.7,328 318.4,292 318.4,220 380.7,184"/>
+    <polygon fill="#E2BC48" points="380.7,328 380.7,400 318.4,436 256,400 256,328 318.4,292"/>
+    <polygon fill="#8C9196" points="256,328 256,400 193.6,436 131.3,400 131.3,328 193.6,292"/>
+    <polygon fill="#9CC56B" points="193.6,220 193.6,292 131.3,328 68.9,292 68.9,220 131.3,184"/>
+    <polygon fill="#3F7A3A" points="256,112 256,184 193.6,220 131.3,184 131.3,112 193.6,76"/>
+    <polygon fill="#E2BC48" points="380.7,112 380.7,184 318.4,220 256,184 256,112 318.4,76"/>
+  </g>
+  <circle cx="256" cy="256" r="44" fill="#F5EDD6" stroke="rgba(0,0,0,0.15)" stroke-width="3"/>
+  <text x="256" y="258" text-anchor="middle" dominant-baseline="central"
+        font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="58" font-weight="700" fill="#B3261E">8</text>
+</svg>

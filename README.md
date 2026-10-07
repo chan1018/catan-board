@@ -15,3 +15,10 @@
 ```sh
 NODE_PATH=$(npm root -g) node tests/smoke.cjs   # puppeteer-core + システムの Chrome
 ```
+
+## スマホのホーム画面に追加
+
+スマホで開くと「ホームに追加」ボタンが出ます（Android はそのまま追加、iPhone は共有ボタンからの手順を表示）。
+追加するとアプリのように全画面で開き、電波がなくても使えます（`sw.js`）。
+
+アイコンの元絵は `icon.svg`。PNG は `NODE_PATH=$(npm root -g) node tools/make-icons.cjs` で書き出す。

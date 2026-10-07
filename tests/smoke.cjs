@@ -12,10 +12,34 @@ const SHOTS = process.env.SHOTS || path.join(ROOT, 'tests', 'shots');
 const results = [];
 const ok = (name, cond, extra = '') => results.push({ name, pass: !!cond, extra });
 
+const MIME = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+  '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png',
+};
 const server = http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-  res.end(fs.readFileSync(path.join(ROOT, 'index.html')));
+  let p = decodeURIComponent(req.url.split('?')[0]);
+  if (p === '/') p = '/index.html';
+  const file = path.join(ROOT, p);
+  if (!fs.existsSync(file)) { res.writeHead(404); res.end(); return; }
+  res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
+  res.end(fs.readFileSync(file));
 });
+// PNG の幅と高さ（IHDR）
+const pngSize = (file) => { const b = fs.readFileSync(file); return [b.readUInt32BE(16), b.readUInt32BE(20)]; };
+// 実際に指で押したときと同じく、その位置の最前面の要素を押す
+const realTap = (page, sel) => page.evaluate((s) => {
+  const el = document.querySelector(s);
+  const r = el.getBoundingClientRect();
+  const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  if (top !== el && !el.contains(top)) return false;
+  top.click();
+  return true;
+}, sel);
+const visible = (page, sel) => page.evaluate((s) => {
+  const el = document.querySelector(s);
+  const r = el.getBoundingClientRect();
+  return getComputedStyle(el).display !== 'none' && r.width > 0 && r.height > 0;
+}, sel);
 
 const readBoard = (page) => page.evaluate(() => {
   const tiles = [...document.querySelectorAll('.tile')].map((g) => ({
@@ -159,6 +183,49 @@ const count = (arr) => arr.reduce((m, k) => ((m[k] = (m[k] || 0) + 1), m), {});
     ok('スマホ横: 盤面が高さのほぼ全部を使う', b3.svgH / 390 > 0.9, (b3.svgH / 390).toFixed(2));
     ok('スマホ横: ボタンが画面内・44px以上', b3.btnVisible && b3.btnH >= 44, b3.btnH);
     await page.screenshot({ path: path.join(SHOTS, 'phone-landscape.png') });
+
+    // --- ホーム画面に追加（PWA）---
+    const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.webmanifest'), 'utf8'));
+    const iconsOk = manifest.icons.every((ic) => {
+      const f = path.join(ROOT, ic.src);
+      const [w, h] = fs.existsSync(f) ? pngSize(f) : [0, 0];
+      return `${w}x${h}` === ic.sizes;
+    }) && pngSize(path.join(ROOT, 'apple-touch-icon.png')).join('x') === '180x180';
+    ok('マニフェストのアイコンが揃っている（192/512/maskable/apple 180）', iconsOk && manifest.icons.some((i) => i.purpose === 'maskable'));
+    ok('マニフェストが standalone 表示', manifest.display === 'standalone' && manifest.start_url === './');
+
+    await page.setViewport({ width: 1280, height: 800 });
+    await page.goto(url, { waitUntil: 'load' });
+    const swOk = await page.evaluate(() => Promise.race([
+      navigator.serviceWorker.ready.then(() => true),
+      new Promise((r) => setTimeout(() => r(false), 5000)),
+    ]));
+    ok('Service Worker が動く（オフラインで開ける）', swOk);
+    ok('PC: 「ホームに追加」は出さない', !(await visible(page, '#install')));
+    // オフラインでも開けるか
+    await page.setOfflineMode(true);
+    await page.reload({ waitUntil: 'load' });
+    ok('オフラインでも盤面が出る', (await page.$$eval('.tile', (g) => g.length)) === 19);
+    await page.setOfflineMode(false);
+
+    const phone = await browser.newPage();
+    phone.on('pageerror', (e) => errors.push(e.message));
+    await phone.setUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1');
+    await phone.setViewport({ width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    await phone.goto(url, { waitUntil: 'load' });
+    ok('スマホ: 「ホームに追加」ボタンが出る', await visible(phone, '#install'));
+    const bar = await phone.evaluate(() => ({
+      title: getComputedStyle(document.querySelector('.bar h1')).display,
+      btns: [...document.querySelectorAll('.bar button')].map((b) => { const r = b.getBoundingClientRect(); return [r.left, r.right, r.height]; }),
+      w: innerWidth,
+    }));
+    ok('スマホ: ボタン2つが画面内に並ぶ（44px以上）', bar.btns.every(([l, r, h]) => l >= 0 && r <= bar.w && h >= 44) && bar.btns[0][1] <= bar.btns[1][0], JSON.stringify(bar.btns.map((b) => b.map(Math.round))));
+    ok('スマホ: 実タップで手順シートが開く', (await realTap(phone, '#install')) && (await visible(phone, '#sheet')));
+    const steps = await phone.$$eval('#sheet-steps li', (li) => li.map((x) => x.textContent));
+    ok('iPhone: 共有ボタン→ホーム画面に追加→追加 の3手順', steps.length === 3 && steps[0].includes('共有ボタン') && steps[1].includes('ホーム画面に追加'), steps[0].slice(0, 20));
+    await phone.screenshot({ path: path.join(SHOTS, 'install-sheet.png') });
+    ok('スマホ: 「閉じる」で閉じる', (await realTap(phone, '#sheet-close')) && !(await visible(phone, '#sheet')));
+    await phone.close();
 
     // --- 小さいスマホ（iPhone SE 相当）---
     await page.setViewport({ width: 375, height: 667, deviceScaleFactor: 2, isMobile: true, hasTouch: true });

@@ -6,6 +6,13 @@
 <title>カタン ランダム盤面</title>
 <meta name="theme-color" content="#4F8FBF">
 <meta name="description" content="カタン（3〜4人用）の地形・数字・港をランダムに並べた盤面を、画面いっぱいに表示します。">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="カタン盤面">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>
   :root {
     --surface: #FAFAF8;
@@ -69,6 +76,52 @@
     touch-action: manipulation; /* 連打でダブルタップ拡大にならないように */
   }
   .bar button:active { transform: translateY(1px); }
+  .bar button.secondary,
+  .sheet button {
+    background: var(--surface);
+    color: var(--primary);
+    border: 1px solid var(--border);
+    box-shadow: none;
+  }
+  .bar button[hidden] { display: none; }
+  /* 狭い画面で2つのボタンを並べるときは題名を省く */
+  @media (max-width: 480px) {
+    .bar:has(#install:not([hidden])) h1 { display: none; }
+    .bar:has(#install:not([hidden])) button { flex: 1; padding: 0 12px; }
+  }
+
+  /* ホーム画面への追加手順（ボトムシート） */
+  .sheet-backdrop {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 10;
+  }
+  .sheet-backdrop[hidden] { display: none; }
+  .sheet {
+    width: 100%;
+    max-width: 480px;
+    padding: 24px 16px calc(16px + env(safe-area-inset-bottom));
+    border-radius: 1rem 1rem 0 0;
+    background: var(--surface);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  }
+  .sheet h2 { margin: 0 0 12px; font-size: 20px; }
+  .sheet ol { margin: 0 0 20px; padding-left: 1.4em; line-height: 1.7; }
+  .sheet li + li { margin-top: 6px; }
+  .sheet b { color: var(--primary); }
+  .sheet button {
+    width: 100%;
+    min-height: 44px;
+    border-radius: var(--radius-md);
+    font: inherit;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+  }
   /* スマホ横向き: 高さが足りないのでボタンを右側の縦帯に移す */
   @media (orientation: landscape) and (max-height: 500px) {
     body { flex-direction: row; }
@@ -76,6 +129,7 @@
     .bar {
       flex-direction: column;
       justify-content: flex-end;
+      align-items: stretch;
       border-top: 0;
       border-left: 1px solid var(--border);
       padding: 12px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) 12px;
@@ -90,7 +144,15 @@
 </main>
 <div class="bar">
   <h1>カタン ランダム盤面</h1>
+  <button id="install" class="secondary" type="button" hidden>ホームに追加</button>
   <button id="regen" type="button">新しい盤面</button>
+</div>
+<div id="sheet" class="sheet-backdrop" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+    <h2 id="sheet-title">ホーム画面に追加する</h2>
+    <ol id="sheet-steps"></ol>
+    <button id="sheet-close" type="button">閉じる</button>
+  </div>
 </div>
 
 <script>
@@ -310,6 +372,51 @@ document.getElementById('regen').addEventListener('click', () => {
 });
 new ResizeObserver(render).observe(svg);
 render();
+
+// --- ホーム画面に追加（スマホ・タブレットで、まだアプリとして開いていないときだけ案内する）---
+const installBtn = document.getElementById('install');
+const sheet = document.getElementById('sheet');
+const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const touch = matchMedia('(pointer: coarse)').matches;
+const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let installPrompt = null;
+
+const STEPS = ios
+  ? [
+    '<b>共有ボタン</b>（四角から上向きの矢印が出ているマーク）をタップします。Safari は画面の下、Chrome はアドレスバーの右にあります。',
+    'メニューを下へスクロールして<b>「ホーム画面に追加」</b>を選びます。',
+    '右上の<b>「追加」</b>をタップすると、ホーム画面にアイコンが並びます。',
+  ]
+  : [
+    'ブラウザ右上の<b>「︙」メニュー</b>を開きます。',
+    '<b>「ホーム画面に追加」</b>または<b>「アプリをインストール」</b>を選びます。',
+    '確認が出たら<b>「追加」</b>（または「インストール」）をタップします。',
+  ];
+document.getElementById('sheet-steps').innerHTML = STEPS.map((s) => `<li>${s}</li>`).join('');
+
+if (touch && !standalone) installBtn.hidden = false;
+addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  if (touch && !standalone) installBtn.hidden = false; // PC の画面には出さない
+});
+addEventListener('appinstalled', () => { installBtn.hidden = true; });
+
+installBtn.addEventListener('click', async () => {
+  if (installPrompt) {
+    // Android の Chrome などはそのまま追加の確認を出せる
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    installPrompt = null;
+    if (outcome === 'accepted') installBtn.hidden = true;
+    return;
+  }
+  sheet.hidden = false;
+});
+document.getElementById('sheet-close').addEventListener('click', () => { sheet.hidden = true; });
+sheet.addEventListener('click', (e) => { if (e.target === sheet) sheet.hidden = true; });
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 </script>
 </body>
 </html>
